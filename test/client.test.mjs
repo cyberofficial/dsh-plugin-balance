@@ -462,14 +462,29 @@ await check('apply registers one composer-dock entry and injects its stylesheet'
   assert.equal(styleTags[0].dataset.plugin, 'dsh-plugin-balance')
 })
 
-await check('dominantBalance picks the largest total and prefers USD on a tie', () => {
+await check('dominantBalance prefers USD, never the larger number', () => {
   const { dominantBalance } = moduleExports
   assert.equal(dominantBalance([]), undefined)
   assert.equal(dominantBalance(undefined), undefined)
-  assert.equal(dominantBalance([{ totalBalance: 1 }, { totalBalance: 9 }]).totalBalance, 9)
+  assert.equal(dominantBalance([{ currency: 'USD', totalBalance: 1 }]).currency, 'USD')
   assert.equal(
     dominantBalance([{ currency: 'CNY', totalBalance: 5 }, { currency: 'USD', totalBalance: 5 }]).currency,
     'USD',
+  )
+  // The API reports each currency in its own unit with no exchange rate, so a
+  // bigger number in another currency must NOT become the headline figure.
+  assert.equal(
+    dominantBalance([
+      { currency: 'USD', totalBalance: 1.64 },
+      { currency: 'CNY', totalBalance: 1500 },
+    ]).currency,
+    'USD',
+    'a larger CNY figure must not outrank USD',
+  )
+  // With no USD row, the first row the host sent wins (order is the host API's).
+  assert.equal(
+    dominantBalance([{ currency: 'CNY', totalBalance: 5 }, { currency: 'JPY', totalBalance: 900 }]).currency,
+    'CNY',
   )
 })
 
@@ -517,7 +532,7 @@ await check('renders the ready state from the host route', async () => {
   assert.match(button.props.title, /click to refresh/i)
 })
 
-await check('renders a dual-currency reading with the secondary figure', async () => {
+await check('renders every currency, each with an explicit unit', async () => {
   globalThis.fetch = async () => ({
     ok: true,
     status: 200,
@@ -533,8 +548,52 @@ await check('renders a dual-currency reading with the secondary figure', async (
   })
   const tree = await render(React.createElement(moduleExports.BalancePill))
   const html = markup(tree)
-  assert.match(html, /1\.86/)
-  assert.match(html, /13\.4/)
+  assert.match(html, /1\.86/, 'the primary figure must render')
+  assert.match(html, /13\.4/, 'the secondary figure must render too')
+  assert.match(html, /CNY/, 'a secondary figure needs its code — two bare symbols do not say which is which')
+
+  const button = findNode(tree, (node) => node.props?.['data-composer-balance'] === true)
+  assert.match(button.props['aria-label'], /1\.86 USD/, 'the spoken form names the primary currency')
+  assert.match(button.props['aria-label'], /also .*13\.4/, 'the spoken form mentions the other currency')
+  assert.match(button.props.title, /Also:/)
+})
+
+await check('a larger foreign amount never becomes the headline figure', async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        isAvailable: true,
+        balances: [
+          { currency: 'USD', totalBalance: 1.86, totalBalanceText: '1.86' },
+          { currency: 'CNY', totalBalance: 1500, totalBalanceText: '1500.00' },
+        ],
+      }
+    },
+  })
+  const tree = await render(React.createElement(moduleExports.BalancePill))
+  const button = findNode(tree, (node) => node.props?.['data-composer-balance'] === true)
+  assert.match(button.props['aria-label'], /balance: \$?1\.86 USD/, 'USD stays primary despite the larger CNY figure')
+  assert.ok(
+    button.props['aria-label'].indexOf('1.86') < button.props['aria-label'].indexOf('1,500'),
+    'the primary figure must be spoken first',
+  )
+})
+
+await check('a CNY-only account shows the yuan figure', async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { isAvailable: true, balances: [{ currency: 'CNY', totalBalance: 9.5, totalBalanceText: '9.50' }] }
+    },
+  })
+  const tree = await render(React.createElement(moduleExports.BalancePill))
+  const button = findNode(tree, (node) => node.props?.['data-composer-balance'] === true)
+  assert.match(button.props['aria-label'], /9\.5/)
+  assert.match(button.props['aria-label'], /CNY/)
+  assert.doesNotMatch(button.props['aria-label'], /also/, 'a single currency has no secondary line')
 })
 
 await check('flags a low balance in the accessible label', async () => {

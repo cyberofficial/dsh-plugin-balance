@@ -126,21 +126,49 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Pick the row worth showing: the largest total, preferring USD on a tie so
-     * a dual-currency account stays stable between refreshes.
+     * Pick the row to show first: USD when present, else the first row the host
+     * sent. NOT the largest number — the API reports each currency in its own
+     * unit with no exchange rate, so ¥11.90 is not "more" than $1.64 and a
+     * numeric comparison would promote the yuan figure on a dual-currency
+     * account. Every other row is still shown beside it.
      * @param balances - host-provided rows.
      * @returns the chosen row, or undefined when there are none.
      */
     function dominantBalance(balances) {
       if (!Array.isArray(balances) || balances.length === 0) return undefined
-      return balances.reduce((best, entry) => {
-        if (best === undefined) return entry
-        const a = typeof entry?.totalBalance === 'number' ? entry.totalBalance : -Infinity
-        const b = typeof best?.totalBalance === 'number' ? best.totalBalance : -Infinity
-        if (a > b) return entry
-        if (a === b && entry?.currency === 'USD' && best?.currency !== 'USD') return entry
-        return best
-      }, undefined)
+      return balances.find((entry) => entry?.currency === 'USD') ?? balances[0]
+    }
+
+    /**
+     * Name a currency in the fewest characters that still removes ambiguity:
+     * a symbol when it is unmistakable (`USD` -> `$`), else the ISO code.
+     * @param currency - currency code from the host.
+     * @returns a short label, or '' when there is no currency to name.
+     */
+    function currencyLabel(currency) {
+      if (typeof currency !== 'string' || currency === '') return ''
+      if (currency === 'USD') return '$'
+      if (currency === 'CNY') return '¥'
+      return currency
+    }
+
+    /**
+     * The secondary-currency line. Each figure keeps an explicit unit, because
+     * two bare symbols side by side do not say which is which — and a symbol
+     * alone cannot distinguish CNY from JPY.
+     * @param rows - the balances other than the primary one.
+     * @param locale - BCP-47 tag for digit presentation.
+     * @returns display text, e.g. `¥11.90 CNY`.
+     */
+    function formatOthers(rows, locale) {
+      return rows
+        .map((row) => {
+          const figure = formatAmount(row, locale)
+          const code = typeof row?.currency === 'string' ? row.currency : ''
+          // Skip a code that the figure already spells out.
+          return code === '' || figure.includes(code) ? figure : `${figure} ${code}`
+        })
+        .join(' · ')
     }
 
     /** Read the host route. Same-origin, so no credential or CORS involved. */
@@ -335,20 +363,24 @@ window.__ModuleLoader__.load({
       const amount = formatAmount(entry, locale)
       const low = data?.isAvailable === false
       const others = (data?.balances ?? []).filter((row) => row !== entry)
-      const detail = others
-        .map((row) => formatAmount(row, locale))
-        .join(' · ')
+      const detail = formatOthers(others, locale)
+      // Spoken and long-form figures carry the unit, never a bare symbol.
+      const amountSpoken = currencyLabel(entry?.currency) === ''
+        ? amount
+        : amount + ' ' + entry.currency
 
       // The rate applies to whatever is spent next, so it belongs in the label
       // a screen reader reads out with the balance.
       const label =
-        (low ? 'DeepSeek balance: ' + amount + ' — too low for API calls' : 'DeepSeek balance: ' + amount) +
+        (low ? 'DeepSeek balance: ' + amountSpoken + ' — too low for API calls' : 'DeepSeek balance: ' + amountSpoken) +
+        (detail === '' ? '' : '; also ' + detail) +
         '. ' + rateText + '.'
       const title =
-        'DeepSeek balance: ' + amount +
-        (detail === '' ? '' : ' (' + detail + ')') +
-        (low ? ' — too low for API calls' : '') +
-        (data?.cached === true ? ' · cached' : '') +
+        'DeepSeek balance: ' +
+        (others.length > 0 ? amountSpoken + ' (' + formatAmount(entry, locale) + ')' : amountSpoken) +
+        (detail === '' ? '' : '\nAlso: ' + detail) +
+        (low ? '\nToo low for API calls' : '') +
+        (data?.cached === true ? '\nCached reading' : '') +
         '\n' + schedule +
         '\nClick to refresh'
 

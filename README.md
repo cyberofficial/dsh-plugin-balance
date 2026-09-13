@@ -45,6 +45,26 @@ Cycle lengths worth knowing, all covered by tests:
 | `10:00Z` → next `01:00Z` off-peak | 15h (overnight) |
 | Friday `10:00Z` → Monday `01:00Z` | 63h (the weekend) |
 
+## Currencies
+
+The API returns a `balance_infos` array that can hold more than one currency
+(`USD` and `CNY` are the documented values). Every row is shown, and any but the
+first is labelled with its ISO code, because two bare symbols side by side do
+not say which is which:
+
+```
+👛 $1.64 · ¥11.90 CNY · Off-peak · 13h left
+```
+
+**USD is the headline figure when the account has it; otherwise the first row
+the API sent.** Deliberately *not* the largest number: the API reports each
+currency in its own unit and provides no exchange rate, so ¥11.90 is not "more"
+than $1.64 — a numeric comparison would promote the yuan figure on a
+dual-currency account. No conversion is attempted, and the pill does not claim
+one.
+
+Spoken labels always name the unit (`$1.64 USD`), never a bare symbol.
+
 ## Refresh policy
 
 It updates on its own — no manual refreshing needed. The balance is only worth
