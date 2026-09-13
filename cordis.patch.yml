@@ -1,0 +1,11 @@
+# Profile patch layer shipped by dsh-plugin-balance itself: installing this
+# package as a profile dependency (it declares `dsh.bundle`) appends this layer
+# automatically, so the single row below is all it takes to mount both halves —
+# the host routes `/plugins/dsh-plugin-balance/api/balance`, and the browser
+# half registers the composer-dock pill.
+#
+# The owner plugin name is the package name so the client module host pairs the
+# row with this package's `dsh.client` browser bundle.
+- insert:
+    - id: plugin-balance
+      name: dsh-plugin-balance
