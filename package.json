@@ -4,7 +4,6 @@
   "private": true,
   "description": "DeepSeek account balance in the DSH Web composer dock — shows remaining credit under the chat input",
   "type": "module",
-  "license": "MIT",
   "main": "lib/index.js",
   "exports": {
     ".": {
@@ -23,7 +22,11 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "check:build": "node scripts/build-client.mjs --check",
-    "test": "npm run check:build && node test/rate-schedule.test.mjs && node test/host.test.mjs && node test/client.test.mjs && node test/integration.test.mjs"
+    "test": "npm run check:build && node test/rate-schedule.test.mjs && node test/host.test.mjs && node test/client.test.mjs && node test/integration.test.mjs",
+    "test:ci": "npm run check:build && node test/rate-schedule.test.mjs && node test/client.test.mjs"
+  },
+  "devDependencies": {
+    "react": "18.3.1"
   },
   "dsh": {
     "bundle": {

@@ -85,15 +85,34 @@ globalThis.document = {
   removeEventListener: () => {},
 }
 
-/** Real React, so hook semantics are the genuine ones. It is a test-only
- * dependency installed outside the plugin package (see the repo README), which
- * keeps the installed plugin free of nested node_modules. */
-const React = (
-  await import(
-    process.env.DSH_BALANCE_TEST_REACT ??
-      new URL('../../.test-deps/node_modules/react/index.js', import.meta.url).href
+/**
+ * Real React, so hook semantics are the genuine ones. It is a test-only
+ * dependency: a plain `npm install` puts it in this package's node_modules, and
+ * inside the plugins workspace a sibling `.test-deps/` install is also
+ * accepted — either way the installed plugin ships no nested node_modules.
+ * `DSH_BALANCE_TEST_REACT` overrides both.
+ * @returns the React namespace.
+ */
+async function loadReact() {
+  const candidates = [
+    process.env.DSH_BALANCE_TEST_REACT,
+    'react',
+    new URL('../../.test-deps/node_modules/react/index.js', import.meta.url).href,
+  ].filter(Boolean)
+  for (const specifier of candidates) {
+    try {
+      return (await import(specifier)).default
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error(
+    'client.test.mjs: cannot resolve React. Run `npm install` in this package, or create ' +
+      'the workspace `.test-deps` install (see README). Tried: ' +
+      candidates.join(', '),
   )
-).default
+}
+const React = await loadReact()
 
 /* ── a tiny react-dom stand-in ───────────────────────────────────────────── */
 

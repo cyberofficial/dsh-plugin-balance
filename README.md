@@ -166,10 +166,18 @@ The row accepts optional overrides in `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
 ## Tests
 
-React is a test-only dependency of the client harness and lives outside this
-package so the installed plugin ships no nested `node_modules`. The client
-harness looks for it in the sibling `.test-deps` directory of the plugins
-workspace (override with `DSH_BALANCE_TEST_REACT`):
+React is a test-only dependency of the client harness, declared in
+`devDependencies` so a plain `npm install && npm test` works on a fresh clone.
+The client harness resolves React from this package's own `node_modules` first
+and otherwise falls back to the sibling `.test-deps` directory of the plugins
+workspace, so no nested `node_modules` ships with the installed plugin. Set
+`DSH_BALANCE_TEST_REACT` to override both:
+
+```sh
+npm install && npm test                # standalone clone
+```
+
+Inside the plugins workspace the shared deps can be used instead:
 
 ```sh
 cd "$(dirname "$PWD")"                 # the plugins workspace root
@@ -179,7 +187,8 @@ cd dsh-plugin-balance && npm test
 ```
 
 The host and integration suites read the API key from `$DSH_HOME/.credentials.yaml`
-(default `~/.dsh`); set `DSH_HOME` to point them at another harness home.
+(default `~/.dsh`); set `DSH_HOME` to point them at another harness home. Those
+two suites need a real key, so `npm run test:ci` runs the portable subset used in CI.
 
 ## Route
 
