@@ -146,10 +146,21 @@ function mount(element, { maxPasses = 12 } = {}) {
         },
       ]
     },
-    useCallback(fn) {
+    useCallback(fn, deps) {
       const index = cursor++
-      slots[index] = slots[index] ?? { value: fn }
-      return slots[index].value
+      const cell = slots[index]
+      if (cell === undefined || cell.deps === undefined || deps === undefined) {
+        slots[index] = { value: fn, deps }
+        return fn
+      }
+      const changed =
+        deps.length !== cell.deps.length ||
+        deps.some((value, i) => !Object.is(value, cell.deps[i]))
+      if (changed) {
+        slots[index] = { value: fn, deps }
+        return fn
+      }
+      return cell.value
     },
     useMemo(fn) {
       const index = cursor++
@@ -469,14 +480,17 @@ await check('apply registers one composer-dock entry and injects its stylesheet'
     },
   }
   moduleExports.apply(ctx)
-  assert.deepEqual(injections, ['conversation.composer.dock'])
-  assert.equal(registrationsSeen.length, 1)
-  assert.equal(registrationsSeen[0].options.name, 'conversation.composer.dock')
+  assert.deepEqual(injections[0], 'conversation.composer.dock')
+  assert.equal(registrationsSeen.length, 2, 'two dock entries: the balance pill and the peak toggle')
   assert.equal(registrationsSeen[0].options.id, 'balance')
-  assert.ok(registrationsSeen[0].options.order > 0, 'must sit after the session-stats strip at order 0')
+  assert.equal(registrationsSeen[1].options.id, 'balance-peak-messaging')
+  assert.equal(registrationsSeen[0].options.order, 10)
+  assert.equal(registrationsSeen[1].options.order, 11, 'the toggle sits directly under the pill')
   assert.equal(typeof registrationsSeen[0].component, 'function')
+  assert.equal(typeof registrationsSeen[1].component, 'function')
   assert.equal(styleTags.length, 1, 'exactly one stylesheet tag')
   assert.match(styleTags[0].textContent, /\.dshBalancePill/)
+  assert.match(styleTags[0].textContent, /\.dshPeakSwitch/, 'the stylesheet styles the toggle switch')
   assert.equal(styleTags[0].dataset.pluginCss, 'dsh-plugin-balance/balance.css')
   assert.equal(styleTags[0].dataset.plugin, 'dsh-plugin-balance')
 })
@@ -1017,6 +1031,186 @@ await check('unmounting clears the safety poll', async () => {
   harness.unmount()
   assert.equal(intervals.size, 0, 'every interval must be cleared on unmount')
   windowListeners.restore()
+})
+
+/* ── the peak messaging toggle ───────────────────────────────────────────── */
+
+/**
+ * A fetch stub that answers each JSON endpoint with its own responder, and
+ * records every call.
+ * @param responders - map of request URL to a response factory.
+ */
+function endpointFetch(responders, onCall = () => {}) {
+  return async (url, init = {}) => {
+    onCall(url, init)
+    const respond = responders[url]
+    if (respond === undefined) return { ok: false, status: 404, async json() { return { error: 'unstubbed' } } }
+    return respond(init)
+  }
+}
+
+/** Render the toggle and hand back tree plus helpers. */
+async function toggleHarness({ state = { peakMessagingEnabled: false, peak: false, endsAtUtc: '23:00' }, instant } = {}) {
+  documentStub('visible')
+  const windowListeners = captureWindowListeners()
+  intervals.clear()
+
+  const RealDate = Date
+  let fixed = instant ?? RealDate.parse('2026-09-14T02:30:00Z') // Monday peak
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length === 0 ? [fixed] : args))
+    }
+    static now() {
+      return fixed
+    }
+  }
+
+  const calls = []
+  globalThis.fetch = endpointFetch(
+    {
+      [moduleExports.PEAK_STATE_PATH]: (init) => {
+        if (init.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            async json() {
+              return { peakMessagingEnabled: JSON.parse(init.body).enabled, peak: true, endsAtUtc: '04:00' }
+            },
+          })
+        }
+        return Promise.resolve({ ok: true, status: 200, async json() { return state } })
+      },
+    },
+    (url, init) => calls.push({ url, method: init.method ?? 'GET', body: init.body }),
+  )
+  const harness = mount(React.createElement(moduleExports.PeakMessagingToggle))
+  return {
+    harness,
+    calls,
+    setInstant: (value) => {
+      fixed = value
+    },
+    unmount: () => {
+      harness.unmount()
+      globalThis.Date = RealDate
+      windowListeners.restore()
+      documentStub('visible')
+    },
+  }
+}
+
+await check('the toggle mounts, reads the preference, and reflects peak state', async () => {
+  const h = await toggleHarness()
+  try {
+    const tree = await h.harness.render()
+    const html = markup(tree)
+    assert.match(html, /dshPeakSwitch/)
+    assert.match(html, /Enable Peak Messaging/)
+    assert.match(html, /aria-checked="false"/, 'the persisted off value renders unchecked')
+    assert.match(html, /peak rates now/, 'during peak the note says the gate is live')
+    // At full strength: no fade parameter on the label span.
+    const row = findNode(tree, (node) => node.props?.className === 'dshPeakOpt')
+    assert.equal(row.props.style.opacity, undefined, 'peak-live rows are not faded')
+  } finally {
+    h.unmount()
+  }
+})
+
+await check('off-peak rows fade slightly but stay clickable', async () => {
+  const h = await toggleHarness({
+    state: { peakMessagingEnabled: false, peak: false, endsAtUtc: '01:00' },
+    instant: Date.parse('2026-09-13T12:00:00Z'), // Sunday, off-peak
+  })
+  try {
+    const tree = await h.harness.render()
+    const row = findNode(tree, (node) => node.props?.className === 'dshPeakOpt')
+    assert.equal(row.props.style.opacity, 0.55, 'off-peak and unarmed means a visual recess')
+    const button = findNode(tree, (node) => node.props?.role === 'switch')
+    assert.equal(button.props.disabled, false, 'the switch must NOT be disabled off-peak — pre-clicking is supported')
+    assert.match(markup(tree), /off-peak · sending allowed/)
+  } finally {
+    h.unmount()
+  }
+})
+
+await check('pre-clicking off-peak arms the toggle and removes the fade', async () => {
+  const h = await toggleHarness({
+    state: { peakMessagingEnabled: false, peak: false, endsAtUtc: '01:00' },
+    instant: Date.parse('2026-09-13T12:00:00Z'),
+  })
+  try {
+    const tree = await h.harness.render()
+    const button = findNode(tree, (node) => node.props?.role === 'switch')
+    assert.equal(button.props['aria-checked'], false)
+
+    button.props.onClick()
+    await h.harness.settle()
+    const after = markup(h.harness.tree)
+    assert.match(after, /aria-checked="true"/, 'the optimistic flip renders immediately')
+    assert.match(after, /armed for next peak/, 'an armed off-peak toggle is described as pre-clicked')
+    assert.equal(
+      findNode(h.harness.tree, (node) => node.props?.className === 'dshPeakOpt').props.style.opacity,
+      undefined,
+      'an armed row is at full strength',
+    )
+    const post = h.calls.find((call) => call.method === 'POST')
+    assert.ok(post, 'the flip persisted')
+    assert.equal(JSON.parse(post.body).enabled, true, 'the POST carries the flipped value')
+  } finally {
+    h.unmount()
+  }
+})
+
+await check('a failed save reverts the toggle and says so', async () => {
+  documentStub('visible')
+  const windowListeners = captureWindowListeners()
+  intervals.clear()
+  const RealDate = Date
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length === 0 ? [RealDate.parse('2026-09-14T02:30:00Z')] : args))
+    }
+  }
+  globalThis.fetch = endpointFetch({
+    [moduleExports.PEAK_STATE_PATH]: (init) => {
+      if (init.method === 'POST') {
+        return Promise.resolve({ ok: false, status: 500, async json() { return { error: 'disk on fire' } } })
+      }
+      return Promise.resolve({ ok: true, status: 200, async json() { return { peakMessagingEnabled: true, peak: true } } })
+    },
+  })
+  try {
+    const harness = mount(React.createElement(moduleExports.PeakMessagingToggle))
+    await harness.render()
+    assert.match(markup(harness.tree), /aria-checked="true"/)
+    const button = findNode(harness.tree, (node) => node.props?.role === 'switch')
+    button.props.onClick()
+    await harness.settle()
+    await harness.settle()
+    const after = markup(harness.tree)
+    assert.match(after, /aria-checked="true"/, 'a failed optimistic flip reverts to the server value')
+    assert.match(after, /save failed/, 'the note names the failure')
+  } finally {
+    globalThis.Date = RealDate
+    windowListeners.restore()
+    documentStub('visible')
+  }
+})
+
+await check('an unreachable endpoint hides the toggle rather than showing a dead switch', async () => {
+  documentStub('visible')
+  const windowListeners = captureWindowListeners()
+  intervals.clear()
+  globalThis.fetch = endpointFetch({})
+  try {
+    const harness = mount(React.createElement(moduleExports.PeakMessagingToggle))
+    const tree = await harness.render()
+    assert.equal(tree, null, 'no endpoint, no control')
+  } finally {
+    windowListeners.restore()
+    documentStub('visible')
+  }
 })
 
 console.log(failures === 0 ? '\nclient half: all checks passed' : `\nclient half: ${failures} check(s) failed`)

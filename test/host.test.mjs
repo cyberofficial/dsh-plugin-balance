@@ -36,8 +36,16 @@ function fakeContext() {
   const routes = []
   const warnings = []
   const ctx = {
-    logger: { warn: (message) => warnings.push(message) },
+    logger: { warn: (message) => warnings.push(message), info: (message) => warnings.push(message) },
     get: () => undefined,
+    /** Peak-gate taps live on the agent dispatch; recorded for inspection. */
+    on: (event, listener) => {
+      ctx.listeners.set(event, listener)
+      return () => ctx.listeners.delete(event)
+    },
+    listeners: new Map(),
+    /** The connection endpoint joins later; recorded, never invoked here. */
+    inject: () => undefined,
     effect: (fn) => {
       const disposer = fn()
       return () => disposer?.()

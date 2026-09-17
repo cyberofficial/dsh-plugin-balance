@@ -65,6 +65,49 @@ one.
 
 Spoken labels always name the unit (`$1.64 USD`), never a bare symbol.
 
+## Peak messaging gate
+
+During the peak windows (01:00–04:00 and 06:00–10:00 UTC, Monday–Friday) the
+plugin can refuse outbound DeepSeek requests whose responses would bill at peak
+rates before they are sent:
+
+- **Only new requests are blocked.** A turn's first model request is what meets
+  the gate; if a peak window opens mid-turn — while a response is already being
+  generated — that exchange always finishes and is never interrupted. The gate
+  admits a turn once and passes every later step of it.
+- **The gate covers the DeepSeek provider only** (`deepseek-official`; extend
+  with the `providers` config row). Every other provider is untouched, and
+  workload hasn't changed — only whether DeepSeek peak rates apply at the moment
+  a request would leave.
+- **A blocked message never generated anything**, so its failure is the user's
+  entry point to decide: the turn fails with
+  `peak rates apply until 04:00 UTC … Flip the toggle under the chat input`,
+  and retrying after flipping (or after the window ends) sends it normally.
+
+### Enable Peak Messaging
+
+The switch sits under the chat input, directly below the balance pill. Off by
+default, persisted across restarts in a small JSON document next to the other
+plugin state. It renders always — including off-peak, since pre-clicking it
+before a window opens is fully supported — and is just styled slightly faded
+while the gate is not currently relevant (off-peak and not armed). Faded means
+visual only: the switch stays clickable in every state.
+
+The endpoint is `/api/plugins/dsh-plugin-balance/peak-messaging` (GET to read,
+POST `{ "enabled": boolean }` to flip), served over the harness's
+browser-authenticated channel. Config row:
+
+```yaml
+- id: plugin-balance
+  config:
+    # peak gate defaults; all optional
+    providers: [deepseek-official]   # gated provider ids
+    stateFile: /path/to/state.json   # defaults inside $DSH_HOME
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: https://api.deepseek.com
+    cacheMs: 30000
+```
+
 ## Refresh policy
 
 It updates on its own — no manual refreshing needed. The balance is only worth

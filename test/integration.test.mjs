@@ -66,10 +66,13 @@ await check('the route answers real HTTP with the live balance', async () => {
 
   const routes = []
   const ctx = {
-    logger: { warn: (message) => console.log(`       warn: ${message}`) },
+    logger: { warn: (message) => console.log(`       warn: ${message}`), info: () => {} },
     effect: (fn) => fn(),
     get: (service) =>
       service === 'credentials' ? { resolve: async () => ({ value: key, source: 'test' }) } : undefined,
+    /** Peak-gate taps; the agent dispatch is not driven over real HTTP here. */
+    on: () => () => {},
+    inject: () => undefined,
     webServer: {
       register: (route) => {
         routes.push(route)
@@ -117,9 +120,11 @@ await check('the route answers real HTTP with the live balance', async () => {
 await check('an unrelated path falls through (no route shadowing)', async () => {
   const routes = []
   const ctx = {
-    logger: { warn: () => {} },
+    logger: { warn: () => {}, info: () => {} },
     effect: (fn) => fn(),
     get: () => undefined,
+    on: () => () => {},
+    inject: () => undefined,
     webServer: { register: (route) => (routes.push(route), () => {}) },
   }
   plugin.apply(ctx)
