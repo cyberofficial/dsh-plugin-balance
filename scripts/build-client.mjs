@@ -16,6 +16,13 @@
  *
  * Usage: node scripts/build-client.mjs [--check]
  *   --check  verify lib/client.js is up to date; exit 1 if it is not
+ *
+ * Line endings: every read is normalized to LF and the bundle is emitted as LF,
+ * so the output is identical on a CRLF checkout (Windows with
+ * `core.autocrlf=true`) and an LF one. Without that, the JSDoc-stripping
+ * patterns below — which anchor on a closing comment marker followed by `\n` —
+ * silently miss every block on a CRLF checkout, and the emitted bundle carries
+ * precisely the prose this build exists to strip.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -27,6 +34,17 @@ const schedulePath = join(root, 'lib', 'schedule.js')
 const outputPath = join(root, 'lib', 'client.js')
 
 const PLACEHOLDER = '//__SCHEDULE_SOURCE__'
+
+/**
+ * Reduce CRLF/CR to LF. Every pattern in this script and the emitted bundle's
+ * own bytes are defined in terms of `\n`, so normalization happens once at the
+ * read boundary rather than inside each pattern.
+ * @param text - raw file contents.
+ * @returns the same text with `\n` line endings.
+ */
+function normalizeEol(text) {
+  return text.replace(/\r\n?/g, '\n')
+}
 
 /**
  * Extract the pieces of the schedule module a bundle can execute: the exported
@@ -54,16 +72,17 @@ function extractScheduleBody(source) {
     .trimEnd()
 }
 
-const template = readFileSync(templatePath, 'utf8')
+const template = normalizeEol(readFileSync(templatePath, 'utf8'))
 if (!template.includes(PLACEHOLDER)) {
   throw new Error(`build-client: ${templatePath} has no ${PLACEHOLDER} marker`)
 }
 
-const schedule = extractScheduleBody(readFileSync(schedulePath, 'utf8'))
+const schedule = extractScheduleBody(normalizeEol(readFileSync(schedulePath, 'utf8')))
 const built = template.replaceAll(PLACEHOLDER, schedule)
 
 if (process.argv.includes('--check')) {
-  const existing = readFileSync(outputPath, 'utf8')
+  // Normalized on both sides: a CRLF checkout must not read as stale.
+  const existing = normalizeEol(readFileSync(outputPath, 'utf8'))
   if (existing !== built) {
     console.error('build-client: lib/client.js is stale — run `npm run build`')
     process.exit(1)

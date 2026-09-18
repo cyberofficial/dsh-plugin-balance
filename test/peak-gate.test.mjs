@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 
@@ -127,8 +127,13 @@ await check('normalizeState degrades corrupt files to disabled', () => {
 })
 
 await check('store lives in the resolved home and persists flips', () => {
-  process.env.DSH_HOME = '/tmp/nonexistent-peak-home-test'
-  assert.equal(resolveHome(process.env), '/tmp/nonexistent-peak-home-test')
+  // Portable literal: the old POSIX-only '/tmp/...' is drive-relative on
+  // Windows, where resolve() would rewrite it. The store normalizes with
+  // resolve(expandHomePath(...)) exactly like the harness, so the expectation
+  // is the resolved form, not the raw override.
+  const home = join(tmpdir(), 'nonexistent-peak-home-test')
+  process.env.DSH_HOME = home
+  assert.equal(resolveHome(process.env), resolve(home))
   process.env.DSH_HOME = DSH_HOME_BACKUP
 
   const dir = mkdtempSync(join(tmpdir(), 'peak-gate-store-'))

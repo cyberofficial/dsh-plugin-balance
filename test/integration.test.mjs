@@ -10,6 +10,7 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 import { credentialKey, dshHome, loadYaml, profileDir } from './env.mjs'
 
@@ -40,7 +41,9 @@ let plugin
 await check('the profile resolves the plugin by its package name', async () => {
   assert.equal(manifest.name, 'dsh-plugin-balance')
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
-  plugin = await import(requireFromProfile.resolve('dsh-plugin-balance'))
+  // `resolve` yields a native absolute path; handing that straight to import()
+  // reads a Windows drive letter as a URL scheme, so it goes through a file URL.
+  plugin = await import(pathToFileURL(requireFromProfile.resolve('dsh-plugin-balance')).href)
   assert.equal(typeof plugin.apply, 'function')
 })
 
